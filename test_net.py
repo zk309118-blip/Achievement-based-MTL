@@ -1,3 +1,255 @@
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    Android:layout_width="match_parent"
+    Android:layout_height="match_parent"
+    Android:padding="16dp">
+
+    <TextView
+        Android:id="@+id/devicesStatus"
+        Android:layout_width="match_parent"
+        Android:layout_height="wrap_content"
+        Android:textSize="16sp"
+        Android:textStyle="bold"
+        Android:padding="8dp"/>
+</ScrollView>class DashboardActivity : AppCompatActivity() {
+    Private val networksDevices = mapOf(
+        "MyHomeNetwork" to listOf(Device("Light", "192.168.1.50", 8080),
+                                  Device("TV", "192.168.1.60", 9090)),
+        "WorkNetwork" to listOf(Device("Printer", "192.168.10.20", 7070),
+                                Device("Projector", "192.168.10.30", 6060)),
+        "ClubNetwork" to listOf(Device("Speaker", "192.168.20.40", 5050),
+                                Device("AC", "192.168.20.50", 4040))
+    )
+
+    Override fun onCreate(savedInstanceState: Bundle?) {
+        Super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_dashboard)
+
+        val statusView = findViewById<TextView>(R.id.devicesStatus)
+        statusView.text = getAllNetworksStatus()
+    }
+
+    Private fun getAllNetworksStatus(): String {
+        Val builder = StringBuilder()
+        For ((network, devices) in networksDevices) {
+            Builder.append("📡 شبكة: $network\n")
+            For (device in devices) {
+                Val reachable = isDeviceReachable(device.ip, device.port)
+                Builder.append(" - ${device.name}: ${if (reachable) "متصل" else "غير متصل"}\n")
+            }
+            Builder.append("\n")
+        }
+        Return builder.toString()
+    }
+
+    Private fun isDeviceReachable(ip: String, port: Int): Boolean {
+        Return try {
+            Val socket = Socket()
+            Socket.connect(InetSocketAddress(ip, port), 1000)
+            Socket.close()
+            True
+        } catch (e: Exception) {
+            False
+        }
+    }
+
+    Data class Device(val name: String, val ip: String, val port: Int)
+}تمام يا أمير 👌  
+دلوقتي هاعرض لك كل الأكواد مع بعضهم في صورة مشروع متكامل، بحيث يكون عندك:  
+- قراءة بطاقات NFC.  
+- التحقق من الشبكة الحالية (منزل – عمل – نادي).  
+- تشفير الأوامر (AES).  
+- إرسال الأوامر عبر Wi-Fi.  
+- تسجيل العمليات (نجاح/رفض) مع الطابع الزمني.  
+- إشعارات مباشرة.  
+- شاشة Dashboard تعرض الأجهزة في كل شبكة وحالتها (متصل/غير متصل).  
+
+
+
+📄 الكود الكامل (Kotlin – أندرويد)
+
+الكلاس الرئيسي للتحكم عبر NFC
+`kotlin
+Import android.app.*
+Import android.content.*
+Import android.net.wifi.WifiManager
+Import android.os.*
+Import android.util.Base64
+Import androidx.appcompat.app.AppCompatActivity
+Import androidx.core.app.NotificationCompat
+Import java.io.*
+Import java.net.*
+Import javax.crypto.Cipher
+Import javax.crypto.spec.SecretKeySpec
+
+Class SecureNfcControlActivity : AppCompatActivity() {
+    Private var nfcAdapter: NfcAdapter? = null
+
+    // الشبكات المصرح بها + مفتاح تشفير لكل شبكة
+    Private val allowedNetworks = mapOf(
+        "\"MyHomeNetwork\"" to "HOMESECRETKEY_123456",
+        "\"WorkNetwork\"" to "WORKSECRETKEY_654321",
+        "\"ClubNetwork\"" to "CLUBSECRETKEY_987654"
+    )
+
+    Override fun onNewIntent(intent: Intent) {
+        Super.onNewIntent(intent)
+        Val rawMsgs = intent.getParcelableArrayExtra(NfcAdapter.EXTRANDEFMESSAGES)
+        If (rawMsgs != null) {
+            Val msgs = rawMsgs.map { it as NdefMessage }
+            For (msg in msgs) {
+                For (record in msg.records) {
+                    Val payload = String(record.payload).trim()
+                    Val currentSSID = getCurrentSSID()
+                    If (allowedNetworks.containsKey(currentSSID)) {
+                        Val secretKey = allowedNetworks[currentSSID]!!
+                        Val encryptedCommand = encryptAES(payload, secretKey)
+                        sendWifiCommand("192.168.1.50", 8080, encryptedCommand)
+                        saveLog("تم التنفيذ على $currentSSID: $payload")
+                    } else {
+                        showNotification("غير متصل بشبكة مصرح بها")
+                        saveLog("تم الرفض بسبب الشبكة: $payload")
+                    }
+                }
+            }
+        }
+    }
+
+    Private fun getCurrentSSID(): String {
+        Val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        Return wifiManager.connectionInfo.ssid
+    }
+
+    Private fun encryptAES(data: String, key: String): String {
+        Val secretKeySpec = SecretKeySpec(key.toByteArray(), "AES")
+        Val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
+        Cipher.init(Cipher.ENCRYPT_MODE, secretKeySpec)
+        Val encrypted = cipher.doFinal(data.toByteArray())
+        Return Base64.encodeToString(encrypted, Base64.DEFAULT)
+    }
+
+    Private fun sendWifiCommand(ip: String, port: Int, message: String) {
+        Thread {
+            Try {
+                Val socket = Socket(ip, port)
+                Val out = PrintWriter(socket.getOutputStream(), true)
+                Out.println(message)
+                Socket.close()
+                showNotification("تم إرسال أمر مشفر")
+            } catch (e: Exception) {
+                showNotification("فشل الاتصال بالجهاز")
+                saveLog("فشل التنفيذ: $message")
+                e.printStackTrace()
+            }
+        }.start()
+    }
+
+    Private fun saveLog(data: String) {
+        Val file = File(filesDir, "SecureNFC_Log.txt")
+        Val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date())
+        File.appendText("\n[$timestamp] $data")
+    }
+
+    Private fun showNotification(msg: String) {
+        Val channelId = "SECURENFCCHANNEL"
+        Val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        If (Build.VERSION.SDKINT >= Build.VERSIONCODES.O) {
+            Val channel = NotificationChannel(channelId, "Secure NFC Alerts", NotificationManager.IMPORTANCE_HIGH)
+            notificationManager.createNotificationChannel(channel)
+        }
+        Val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(android.R.drawable.iclocklock)
+            .setContentTitle("تنبيه أمني")
+            .setContentText(msg)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+        notificationManager.notify(System.currentTimeMillis().toInt(), notification)
+    }
+}
+`
+
+
+
+شاشة Dashboard لمتابعة الأجهزة في الشبكات المختلفة
+`kotlin
+Class DashboardActivity : AppCompatActivity() {
+    Private val networksDevices = mapOf(
+        "MyHomeNetwork" to listOf(Device("Light", "192.168.1.50", 8080),
+                                  Device("TV", "192.168.1.60", 9090)),
+        "WorkNetwork" to listOf(Device("Printer", "192.168.10.20", 7070),
+                                Device("Projector", "192.168.10.30", 6060)),
+        "ClubNetwork" to listOf(Device("Speaker", "192.168.20.40", 5050),
+                                Device("AC", "192.168.20.50", 4040))
+    )
+
+    Override fun onCreate(savedInstanceState: Bundle?) {
+        Super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_dashboard)
+
+        val statusView = findViewById<TextView>(R.id.devicesStatus)
+        statusView.text = getAllNetworksStatus()
+    }
+
+    Private fun getAllNetworksStatus(): String {
+        Val builder = StringBuilder()
+        For ((network, devices) in networksDevices) {
+            Builder.append("📡 شبكة: $network\n")
+            For (device in devices) {
+                Val reachable = isDeviceReachable(device.ip, device.port)
+                Builder.append(" - ${device.name}: ${if (reachable) "متصل" else "غير متصل"}\n")
+            }
+            Builder.append("\n")
+        }
+        Return builder.toString()
+    }
+
+    Private fun isDeviceReachable(ip: String, port: Int): Boolean {
+        Return try {
+            Val socket = Socket()
+            Socket.connect(InetSocketAddress(ip, port), 1000)
+            Socket.close()
+            True
+        } catch (e: Exception) {
+            False
+        }
+    }
+
+    Data class Device(val name: String, val ip: String, val port: Int)
+}
+`
+
+
+
+واجهة المستخدم (activity_dashboard.xml)
+`xml
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    Android:layoutwidth="matchparent"
+    Android:layoutheight="matchparent"
+    Android:padding="16dp">
+
+    <TextView
+        Android:id="@+id/devicesStatus"
+        Android:layoutwidth="matchparent"
+        Android:layoutheight="wrapcontent"
+        Android:textSize="16sp"
+        Android:textStyle="bold"
+        Android:padding="8dp"/>
+</ScrollView>
+`
+
+
+
+✨ النتيجة
+- عند تمرير بطاقة NFC → التطبيق يقرأ الأمر ويشفره ويرسله عبر Wi-Fi.  
+- يتحقق من الشبكة (منزل – عمل – نادي).  
+- يسجل كل العمليات في ملف سجل مع الوقت والتاريخ.  
+- يظهر إشعار أمني بكل عملية.  
+- شاشة Dashboard تعرض حالة الأجهزة في كل شبكة بشكل مباشر.  
+
+
+
+تحب أضيف لك كمان زر في Dashboard يسمح بالتحكم المباشر (تشغيل/إيقاف) الأجهزة من الواجهة بدون NFC؟
+
 import os
 import pickle
 import numpy as np
